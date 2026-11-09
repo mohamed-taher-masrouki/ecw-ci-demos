@@ -28,6 +28,18 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Check required ECW configuration before building
+        env:
+          ECW_API_KEY: ${{ secrets.ECW_API_KEY }}
+        run: |
+          if [ -z "$ECW_API_KEY" ]; then
+            echo "::error::Add the ECW_API_KEY repository Actions secret before running a live demo."
+            exit 1
+          fi
+          case "$ECW_BACKEND_URL" in
+            https://*) ;;
+            *) echo "::error::ECW_BACKEND_URL must use HTTPS."; exit 1 ;;
+          esac
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
