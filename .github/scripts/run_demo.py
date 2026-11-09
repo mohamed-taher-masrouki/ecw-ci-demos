@@ -102,9 +102,34 @@ class Demo:
             raise RuntimeError("Set an HTTPS ECW_BACKEND_URL and the ECW_API_KEY secret")
         self.booking_id = None
         self.created = False
+        self.board_identity = None
 
     def request(self, path, **kwargs):
         return request_json(self.base + path, self.key, **kwargs)
+
+    def identify_booking(self, booking):
+        """Resolve the optional booking label through the existing board APIs."""
+        if booking.get("board_id") != 23:
+            raise RuntimeError("Booking is not the expected RA6 board 23")
+        if booking.get("board_name") is not None:
+            if booking["board_name"] != "FPB-RA6E2":
+                raise RuntimeError("Booking is not the expected RA6 board 23")
+            return booking
+        if self.board_identity is None:
+            board = self.request("/board", params={"board_id": 23})
+            board_type_id = board.get("board_type_id")
+            if board.get("id") != 23 or not isinstance(board_type_id, int):
+                raise RuntimeError("Could not verify the booked RA6 board identity")
+            board_type = self.request("/board_type", params={"board_type_id": board_type_id})
+            if (board_type.get("id") != board_type_id
+                    or board_type.get("board_name") != "FPB-RA6E2"
+                    or board_type.get("is_mcu") is not True):
+                raise RuntimeError("Booked board metadata does not identify FPB-RA6E2")
+            self.board_identity = {"board_id": 23, "board_type_id": board_type_id,
+                                   "board_name": board_type["board_name"],
+                                   "source": "/board -> /board_type"}
+            save("board-identity.json", self.board_identity)
+        return {**booking, "board_name": self.board_identity["board_name"]}
 
     def book(self):
         explicit = os.environ.get("ECW_BOOKING_ID", "").strip()
@@ -119,9 +144,9 @@ class Demo:
         deadline = time.monotonic() + 900
         while True:
             booking = self.request("/booking", params={"booking_id": self.booking_id})
+            save("booking-response.json", booking)
+            booking = self.identify_booking(booking)
             save("booking.json", booking)
-            if booking.get("board_id") != 23 or booking.get("board_name") != "FPB-RA6E2":
-                raise RuntimeError("Booking is not the expected RA6 board 23")
             if booking.get("status") == "active" and stamp(booking["start_utc"]) <= datetime.now(timezone.utc):
                 require_booking(booking)
                 return

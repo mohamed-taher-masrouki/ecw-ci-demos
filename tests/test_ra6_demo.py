@@ -86,6 +86,45 @@ class RA6DemoTests(unittest.TestCase):
             demo.release()
             request.assert_called_once_with("/cancel-booking", params={"booking_id": 99})
 
+    def test_booking_with_null_name_resolves_identity_before_accepting_session(self):
+        now = datetime.now(timezone.utc)
+        booking = {"id": 99, "board_id": 23, "board_name": None, "status": "active",
+                   "start_utc": (now - timedelta(minutes=1)).isoformat(),
+                   "end_utc": (now + timedelta(minutes=10)).isoformat()}
+        responses = {"/booking": booking, "/board": {"id": 23, "board_type_id": 7},
+                     "/board_type": {"id": 7, "board_name": "FPB-RA6E2", "is_mcu": True}}
+        demo = run_demo.Demo({"demo": "hello"})
+        with patch.dict(os.environ, {"ECW_BOOKING_ID": "99"}), \
+             patch.object(demo, "request", side_effect=lambda path, **kwargs: responses[path]) as api:
+            demo.book()
+        self.assertEqual([c.args[0] for c in api.call_args_list], ["/booking", "/board", "/board_type"])
+        self.assertIsNone(json.loads((self.directory / "booking-response.json").read_text())["board_name"])
+        self.assertEqual(json.loads((self.directory / "booking.json").read_text())["board_name"], "FPB-RA6E2")
+        self.assertEqual(json.loads((self.directory / "board-identity.json").read_text())["board_type_id"], 7)
+
+    def test_missing_booking_label_does_not_bypass_wrong_board_checks(self):
+        for booking in ({"board_id": 24, "board_name": None},
+                        {"board_id": 23, "board_name": "Another board"}):
+            demo = run_demo.Demo({"demo": "hello"})
+            with self.subTest(booking=booking), patch.object(demo, "request") as api:
+                with self.assertRaises(RuntimeError):
+                    demo.identify_booking(booking)
+                api.assert_not_called()
+
+    def test_missing_booking_label_rejects_inconsistent_board_metadata(self):
+        for board, board_type in (
+            ({"id": 24, "board_type_id": 7}, {}),
+            ({"id": 23}, {}),
+            ({"id": 23, "board_type_id": 7}, {"id": 8, "board_name": "FPB-RA6E2", "is_mcu": True}),
+            ({"id": 23, "board_type_id": 7}, {"id": 7, "board_name": "Other", "is_mcu": True}),
+            ({"id": 23, "board_type_id": 7}, {"id": 7, "board_name": "FPB-RA6E2", "is_mcu": False}),
+        ):
+            demo = run_demo.Demo({"demo": "hello"})
+            with self.subTest(board=board, board_type=board_type), \
+                 patch.object(demo, "request", side_effect=[board, board_type]):
+                with self.assertRaises(RuntimeError):
+                    demo.identify_booking({"board_id": 23, "board_name": None})
+
     def test_failed_job_still_collects_logs_results_and_zip(self):
         demo = run_demo.Demo({"demo": "hello"})
         demo.booking_id = 99
