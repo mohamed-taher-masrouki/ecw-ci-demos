@@ -150,15 +150,30 @@ class Demo:
         save("reservation.json", {"id": self.booking_id, "created_by_run": self.created})
         os.environ["ECW_BOOKING_ID"] = str(self.booking_id)
         deadline = time.monotonic() + 900
+        extension_attempted = False
         while True:
             booking = self.request("/booking", params={"booking_id": self.booking_id})
             save("booking-response.json", booking)
             booking = self.identify_booking(booking)
             save("booking.json", booking)
-            if booking.get("status") == "active" and stamp(booking["start_utc"]) <= datetime.now(timezone.utc):
+            now = datetime.now(timezone.utc)
+            if booking.get("status") in {"cancelled", "cleanedup", "failed"}:
+                raise RuntimeError(f"RA6 booking became {booking['status']} before testing")
+            remaining = (stamp(booking["end_utc"]) - now).total_seconds()
+            if remaining <= 0:
+                raise RuntimeError("RA6 booking expired before testing could start")
+            if remaining <= 360:
+                if self.created and not extension_attempted:
+                    extension_attempted = True
+                    extension = self.request("/extend_booking", method="POST",
+                                             params={"booking_id": self.booking_id, "duration": 10})
+                    save("booking-extension.json", extension)
+                    continue
+                raise RuntimeError("RA6 booking needs more than six minutes remaining before testing")
+            if booking.get("status") == "active" and stamp(booking["start_utc"]) <= now:
                 require_booking(booking)
                 return
-            if booking.get("status") in {"cancelled", "cleanedup", "failed"} or time.monotonic() >= deadline:
+            if time.monotonic() >= deadline:
                 raise RuntimeError("RA6 booking did not become active within 15 minutes")
             print(f"Waiting for RA6 booking {self.booking_id}: {booking.get('status')}", flush=True)
             time.sleep(5)
