@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.error
 from unittest.mock import MagicMock, patch
 import zipfile
 
@@ -85,6 +86,28 @@ class RA6DemoTests(unittest.TestCase):
             demo.created = True
             demo.release()
             request.assert_called_once_with("/cancel-booking", params={"booking_id": 99})
+
+    def test_http_failure_preserves_backend_diagnostic_and_redacts_the_key(self):
+        demo = run_demo.Demo({"demo": "hello"})
+        error = urllib.error.HTTPError("https://example.test", 404, "Not Found", {},
+                                       io.BytesIO(b'{"detail":"No video feed: fake-offline-key"}'))
+        with patch.object(run_demo, "request_json", side_effect=error), self.assertRaises(RuntimeError) as failure:
+            demo.request("/video/99/status")
+        self.assertIn('HTTP 404', str(failure.exception))
+        self.assertIn('No video feed', str(failure.exception))
+        self.assertNotIn('fake-offline-key', str(failure.exception))
+
+    def test_blinky_camera_preflight_prevents_flash_when_video_is_not_ready(self):
+        import upload_and_flash
+        demo = MagicMock()
+        demo.config = {"demo": "blinky"}
+        demo.booking_id = 99
+        demo.request.return_value = {"ready": False}
+        with patch.object(upload_and_flash, "main") as flash:
+            with self.assertRaises(RuntimeError):
+                run_demo.run(demo)
+        demo.request.assert_called_once_with("/video/99/status")
+        flash.assert_not_called()
 
     def test_booking_with_null_name_resolves_identity_before_accepting_session(self):
         now = datetime.now(timezone.utc)
