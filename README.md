@@ -11,6 +11,8 @@ Branch: `demo/ra6-hil-50-samples`. Physical board: **FPB-RA6E2**, ECW board **23
 
 Defaults: `ECW_BACKEND_URL=https://plovdiv.edgebench.io/api`, `ECW_CONSOLE_URL=wss://plovdiv.edgebench.io`. Optional repository variables with these names override the endpoints. RA6 board identity is checked before programming; it cannot be changed by a repository variable. Auto-booking waits up to 15 minutes; the active session must have over six minutes left.
 
+The auto-booking API can return the short remainder of a half-hour slot. If that leaves six minutes or less, the demo requests one ten-minute extension through the normal booking API and checks the booking again. Conflicts, limits, and maintenance rules still apply. A supplied `booking_id` is never extended or cancelled by the demo. Expired and cancelled bookings stop polling immediately.
+
 ## What this branch tests
 
 Build → book RA6 → select BME280 → prepare and wait active (180 s limit) → send 50 frontend CSV samples / 150 words → upload HEX → explicit flash → read chip ID and 50 SPI samples via the booked console → compare CSV words → release
