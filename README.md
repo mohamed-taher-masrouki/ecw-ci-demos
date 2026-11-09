@@ -11,6 +11,8 @@ Branch: `demo/ra6-zephyr-twister`. Physical board: **FPB-RA6E2**, ECW board **23
 
 Defaults: `ECW_BACKEND_URL=https://plovdiv.edgebench.io/api`, `ECW_CONSOLE_URL=wss://plovdiv.edgebench.io`. Optional repository variables with these names override the endpoints. RA6 board identity is checked before programming; it cannot be changed by a repository variable. Auto-booking waits up to 15 minutes; the active session must have over six minutes left.
 
+The auto-booking API can return the short remainder of a half-hour slot. If that leaves six minutes or less, the demo requests one ten-minute extension through the normal booking API and checks the booking again. Conflicts, limits, and maintenance rules still apply. A supplied `booking_id` is never extended or cancelled by the demo. Expired and cancelled bookings stop polling immediately.
+
 ## What this branch tests
 
 Build-only check on GitHub → book RA6 → twister.run trusted ci_twister_test profile → backend Twister builds and flashes through pytest/RM → identify firmware, five nonce echoes, increasing uptime → JSON/JUnit reports → release

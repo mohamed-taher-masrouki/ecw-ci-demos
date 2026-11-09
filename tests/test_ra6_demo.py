@@ -134,6 +134,48 @@ class RA6DemoTests(unittest.TestCase):
                     demo.identify_booking(booking)
                 api.assert_not_called()
 
+    def test_expired_confirmed_booking_stops_polling_immediately(self):
+        now = datetime.now(timezone.utc)
+        booking = {"board_id": 23, "board_name": "FPB-RA6E2", "status": "confirmed",
+                   "start_utc": (now - timedelta(minutes=20)).isoformat(),
+                   "end_utc": (now - timedelta(seconds=1)).isoformat()}
+        demo = run_demo.Demo({"demo": "twister"})
+        with patch.dict(os.environ, {"ECW_BOOKING_ID": "99"}), \
+             patch.object(demo, "request", return_value=booking) as api, \
+             patch.object(run_demo.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "expired"):
+                demo.book()
+        api.assert_called_once_with("/booking", params={"booking_id": 99})
+        sleep.assert_not_called()
+
+    def test_caller_booking_is_never_extended_to_fit_a_test(self):
+        now = datetime.now(timezone.utc)
+        booking = {"board_id": 23, "board_name": "FPB-RA6E2", "status": "active",
+                   "start_utc": (now - timedelta(minutes=20)).isoformat(),
+                   "end_utc": (now + timedelta(minutes=3)).isoformat()}
+        demo = run_demo.Demo({"demo": "twister"})
+        with patch.dict(os.environ, {"ECW_BOOKING_ID": "99"}), \
+             patch.object(demo, "request", return_value=booking) as api:
+            with self.assertRaisesRegex(RuntimeError, "six minutes"):
+                demo.book()
+        api.assert_called_once_with("/booking", params={"booking_id": 99})
+
+    def test_short_ci_created_booking_is_extended_and_rechecked_before_testing(self):
+        now = datetime.now(timezone.utc)
+        short = {"board_id": 23, "board_name": "FPB-RA6E2", "status": "confirmed",
+                 "start_utc": (now - timedelta(seconds=1)).isoformat(),
+                 "end_utc": (now + timedelta(minutes=3)).isoformat()}
+        active = {**short, "status": "active", "end_utc": (now + timedelta(minutes=13)).isoformat()}
+        demo = run_demo.Demo({"demo": "twister"})
+        with patch.dict(os.environ, {"ECW_BOOKING_ID": ""}), \
+             patch.object(demo, "request", side_effect=[{"id": 99}, short, {"id": 99}, active]) as api:
+            demo.book()
+        self.assertTrue(demo.created)
+        self.assertEqual([c.args[0] for c in api.call_args_list],
+                         ["/auto-bookings", "/booking", "/extend_booking", "/booking"])
+        self.assertEqual(api.call_args_list[2].kwargs, {"method": "POST", "params": {"booking_id": 99, "duration": 10}})
+        self.assertTrue((self.directory / "booking-extension.json").exists())
+
     def test_missing_booking_label_rejects_inconsistent_board_metadata(self):
         for board, board_type in (
             ({"id": 24, "board_type_id": 7}, {}),
