@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import time
 import uuid
+import urllib.error
 import zipfile
 
 from ecw_client import request_bytes, request_json
@@ -105,7 +106,14 @@ class Demo:
         self.board_identity = None
 
     def request(self, path, **kwargs):
-        return request_json(self.base + path, self.key, **kwargs)
+        try:
+            return request_json(self.base + path, self.key, **kwargs)
+        except urllib.error.HTTPError as error:
+            try:
+                detail = error.read(4096).decode("utf-8", errors="replace").replace(self.key, "[redacted]")
+            finally:
+                error.close()
+            raise RuntimeError(f"ECW {kwargs.get('method', 'GET')} {path}: HTTP {error.code}: {detail}") from None
 
     def identify_booking(self, booking):
         """Resolve the optional booking label through the existing board APIs."""
@@ -214,6 +222,11 @@ def run(demo):
     import upload_and_flash
 
     config = demo.config
+    if config["demo"] == "blinky":
+        video_status = demo.request(f"/video/{demo.booking_id}/status")
+        save("video-status.json", video_status)
+        if video_status.get("ready") is not True:
+            raise RuntimeError("RA6 camera must be ready before flashing the blinky demo")
     if config["demo"] == "hil":
         os.environ["HIL_SENSOR_NAME"] = "BME280"
         os.environ["HIL_CSV_FILE"] = "bme280.csv"
